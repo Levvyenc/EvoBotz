@@ -23,6 +23,7 @@ check_token() {
     echo "Token salah!"
     exit 1
   fi
+  sleep 1
   clear
 }
 
@@ -48,7 +49,7 @@ install_theme() {
 
   unzip -oq "/root/${THEME_NAME}.zip" -d /root/pterodactyl
 
-  if [ "$THEME_NAME" == "enigma" ]; then
+  if [ "$THEME_NAME" = "enigma" ]; then
     read -p "Link WhatsApp: " LINK_WA
     read -p "Link Group: " LINK_GROUP
     read -p "Link Channel: " LINK_CHNL
@@ -174,11 +175,14 @@ hackback_panel() {
   read -p "Username baru: " user
   read -p "Password login: " psswdhb
 
+  RND=$(cat /dev/urandom | tr -dc a-z0-9 | head -c 8)
+  EMAIL="hbpanel_${RND}@gmail.com"
+
   cd /var/www/pterodactyl || exit 1
 
   php artisan p:user:make <<EOF
 yes
-hackback@gmail.com
+$EMAIL
 $user
 $user
 $user
@@ -186,7 +190,12 @@ $psswdhb
 EOF
 
   echo "Akun berhasil ditambahkan."
+  echo "Email: $EMAIL"
+  echo "Username: $user"
+  echo "Password: $psswdhb"
+
   sleep 1
+  exit
 }
 
 ubahpw_vps() {
