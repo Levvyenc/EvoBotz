@@ -17,7 +17,7 @@ check_token() {
   echo "Masukkan akses token:"
   read -r USER_TOKEN
 
-  if [ "$USER_TOKEN" = "skyzodev" ]; then
+  if [ "$USER_TOKEN" = "levicode" ]; then
     echo "Akses berhasil"
   else
     echo "Token salah!"
