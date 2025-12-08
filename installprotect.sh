@@ -1,118 +1,51 @@
 #!/bin/bash
 
-install_protection() {
+repair_protection() {
+    clear
+    echo "Memperbaiki proteksi panel..."
+    sleep 2
+
+    # Restore backup files
+    if [ -f "/var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php.backup" ]; then
+        cp /var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php.backup /var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php
+    fi
+
+    if [ -f "/var/www/pterodactyl/app/Http/Controllers/Admin/UsersController.php.backup" ]; then
+        cp /var/www/pterodactyl/app/Http/Controllers/Admin/UsersController.php.backup /var/www/pterodactyl/app/Http/Controllers/Admin/UsersController.php
+    fi
+
+    # Remove added middleware lines
+    sed -i '/use Pterodactyl\\Http\\Middleware\\AdminProtection;/d' /var/www/pterodactyl/app/Http/Controllers/Controller.php
+    sed -i '/$this->middleware(AdminProtection::class);/d' /var/www/pterodactyl/app/Http/Controllers/Controller.php
+    sed -i "/'admin.protection' => \\\\Pterodactyl\\\\Http\\\\Middleware\\\\AdminProtection::class,/d" /var/www/pterodactyl/app/Http/Kernel.php
+
+    # Remove middleware file if exists
+    rm -f /var/www/pterodactyl/app/Http/Middleware/AdminProtection.php
+
+    cd /var/www/pterodactyl
+    php artisan cache:clear
+    php artisan route:clear
+    php artisan view:clear
+    php artisan config:clear
+
+    echo "Proteksi berhasil dihapus! Panel kembali normal."
+    sleep 2
+}
+
+# Main execution
+if [ "$1" = "repair" ]; then
+    repair_protection
+else
+    # Install protection
     clear
     echo "Menginstall proteksi panel..."
     sleep 2
 
+    # Create backups
     cp /var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php /var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php.backup
     cp /var/www/pterodactyl/app/Http/Controllers/Admin/UsersController.php /var/www/pterodactyl/app/Http/Controllers/Admin/UsersController.php.backup
-    cp /var/www/pterodactyl/app/Http/Controllers/Controller.php /var/www/pterodactyl/app/Http/Controllers/Controller.php.backup
 
-    cat > /tmp/AdminProtection.php << 'EOF'
-<?php
-
-namespace Pterodactyl\Http\Middleware;
-
-use Closure;
-use Illuminate\Http\Request;
-
-class AdminProtection
-{
-    public function handle(Request $request, Closure $next)
-    {
-        $user = $request->user();
-        $route = $request->route();
-        
-        if (!$user) {
-            return $next($request);
-        }
-        
-        $adminRoutes = [
-            'admin.users.create',
-            'admin.users.store',
-            'admin.users.destroy',
-            'admin.settings.*',
-            'admin.nests.*',
-            'admin.locations.*',
-            'admin.nodes.*',
-        ];
-        
-        $currentRoute = $route->getName();
-        
-        foreach ($adminRoutes as $protectedRoute) {
-            if (fnmatch($protectedRoute, $currentRoute)) {
-                if ($user->id !== 1) {
-                    abort(403, 'Administrator privileges required');
-                }
-            }
-        }
-        
-        return $next($request);
-    }
-}
-EOF
-
-    sudo mv /tmp/AdminProtection.php /var/www/pterodactyl/app/Http/Middleware/AdminProtection.php
-
-    cat > /tmp/ServerController.php << 'EOF'
-<?php
-
-namespace Pterodactyl\Http\Controllers\Api\Client\Servers;
-
-use Illuminate\Http\Response;
-use Pterodactyl\Models\Server;
-use Pterodactyl\Repositories\Eloquent\ServerRepository;
-use Pterodactyl\Services\Servers\ServerDeletionService;
-use Pterodactyl\Http\Controllers\Api\Client\ClientApiController;
-use Pterodactyl\Http\Requests\Api\Client\Servers\GetServerRequest;
-use Pterodactyl\Http\Requests\Api\Client\Servers\DeleteServerRequest;
-
-class ServerController extends ClientApiController
-{
-    private ServerDeletionService $deletionService;
-    private ServerRepository $repository;
-
-    public function __construct(ServerDeletionService $deletionService, ServerRepository $repository)
-    {
-        parent::__construct();
-        $this->deletionService = $deletionService;
-        $this->repository = $repository;
-    }
-
-    public function index(GetServerRequest $request): array
-    {
-        $user = $request->user();
-        
-        if ($user->id !== 1) {
-            $servers = $request->user()->servers->filter(function (Server $server) use ($user) {
-                return $server->owner_id === $user->id;
-            })->values();
-            
-            return $this->fractal->transformWith($this->getTransformer(ServerTransformer::class))
-                ->collection($servers)
-                ->toArray();
-        }
-        
-        return parent::index($request);
-    }
-
-    public function delete(DeleteServerRequest $request, Server $server)
-    {
-        $user = $request->user();
-        
-        if ($user->id !== 1 && $server->owner_id !== $user->id) {
-            return response()->json(['error' => 'Unauthorized'], 403);
-        }
-        
-        $this->deletionService->handle($server);
-        return new Response('', 204);
-    }
-}
-EOF
-
-    sudo mv /tmp/ServerController.php /var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php
-
+    # Fix UsersController - allow user ID 1 full access
     cat > /tmp/UsersController.php << 'EOF'
 <?php
 
@@ -142,6 +75,14 @@ class UsersController extends Controller
 
     public function index(): View
     {
+        $user = auth()->user();
+        
+        if ($user->id !== 1) {
+            // Non-admin users can only see themselves
+            $users = $this->repository->findWhere([['id', '=', $user->id]]);
+            return view('admin.users.index', ['users' => $users]);
+        }
+        
         return view('admin.users.index', [
             'users' => $this->repository->setSearchTerm(request()->input('query'))->getAllUsers(),
         ]);
@@ -222,19 +163,73 @@ EOF
 
     sudo mv /tmp/UsersController.php /var/www/pterodactyl/app/Http/Controllers/Admin/UsersController.php
 
-    sed -i '/namespace.*Controller;/a\use Pterodactyl\\Http\\Middleware\\AdminProtection;' /var/www/pterodactyl/app/Http/Controllers/Controller.php
+    # Fix ServerController
+    cat > /tmp/ServerController.php << 'EOF'
+<?php
 
-    sed -i '/public function __construct()/a\        $this->middleware(AdminProtection::class);' /var/www/pterodactyl/app/Http/Controllers/Controller.php
+namespace Pterodactyl\Http\Controllers\Api\Client\Servers;
 
-    sed -i "/protected \$routeMiddleware = \[/a\        'admin.protection' => \\Pterodactyl\\Http\\Middleware\\AdminProtection::class," /var/www/pterodactyl/app/Http/Kernel.php
+use Illuminate\Http\Response;
+use Pterodactyl\Models\Server;
+use Pterodactyl\Repositories\Eloquent\ServerRepository;
+use Pterodactyl\Services\Servers\ServerDeletionService;
+use Pterodactyl\Http\Controllers\Api\Client\ClientApiController;
+use Pterodactyl\Http\Requests\Api\Client\Servers\GetServerRequest;
+use Pterodactyl\Http\Requests\Api\Client\Servers\DeleteServerRequest;
+use Pterodactyl\Transformers\Api\Client\ServerTransformer;
+
+class ServerController extends ClientApiController
+{
+    private ServerDeletionService $deletionService;
+    private ServerRepository $repository;
+
+    public function __construct(ServerDeletionService $deletionService, ServerRepository $repository)
+    {
+        parent::__construct();
+        $this->deletionService = $deletionService;
+        $this->repository = $repository;
+    }
+
+    public function index(GetServerRequest $request): array
+    {
+        $user = $request->user();
+        
+        if ($user->id !== 1) {
+            $servers = $user->servers()->get();
+            return $this->fractal->collection($servers)
+                ->transformWith($this->getTransformer(ServerTransformer::class))
+                ->toArray();
+        }
+        
+        return parent::index($request);
+    }
+
+    public function delete(DeleteServerRequest $request, Server $server)
+    {
+        $user = $request->user();
+        
+        if ($user->id !== 1 && $server->owner_id !== $user->id) {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+        
+        $this->deletionService->handle($server);
+        return new Response('', 204);
+    }
+}
+EOF
+
+    sudo mv /tmp/ServerController.php /var/www/pterodactyl/app/Http/Controllers/Api/Client/Servers/ServerController.php
 
     cd /var/www/pterodactyl
     php artisan cache:clear
     php artisan route:clear
     php artisan view:clear
+    php artisan config:clear
 
     echo "Proteksi berhasil diinstall!"
-    sleep 2
-}
-
-install_protection
+    echo "User ID 1 memiliki akses penuh."
+    echo "User lain hanya bisa melihat dan mengelola akun/server sendiri."
+    echo ""
+    echo "Jika ada error, jalankan: ./installprotect.sh repair"
+    sleep 3
+fi
