@@ -1,4 +1,61 @@
+
 #!/bin/bash
+
+installpanel_auto() {
+  PANEL_DOMAIN="$1"
+  NODE_DOMAIN="$2"
+  RAM="$3"
+
+  bash <(curl -s https://pterodactyl-installer.se) <<EOF
+y
+y
+y
+y
+$PANEL_DOMAIN
+admin
+admin@$PANEL_DOMAIN
+admin
+admin
+y
+EOF
+
+  cd /var/www/pterodactyl || exit 1
+
+  php artisan p:location:make <<EOF
+Singapore
+Auto Location
+EOF
+
+  LOCID=$(php artisan p:location:list | awk 'NR>2 {print $1}' | tail -n1)
+
+  php artisan p:node:make <<EOF
+AutoNode
+AutoNode
+$LOCID
+https
+$NODE_DOMAIN
+no
+no
+no
+$RAM
+0
+$RAM
+0
+100
+8080
+2022
+/var/lib/pterodactyl/volumes
+EOF
+
+  NODEID=$(php artisan p:node:list | awk 'NR>2 {print $1}' | tail -n1)
+
+  php artisan p:node:configuration $NODEID > /root/wings.sh
+  chmod +x /root/wings.sh
+  bash /root/wings.sh
+
+  systemctl enable wings
+  systemctl restart wings
+}
 
 display_welcome() {
   echo ""
@@ -9,20 +66,14 @@ display_welcome() {
 }
 
 install_jq() {
-  sudo apt update && sudo apt install -y jq || exit 1
+  sudo apt update && sudo apt install -y jq curl unzip || exit 1
   clear
 }
 
 check_token() {
   echo "Masukkan akses token:"
   read -r USER_TOKEN
-
-  if [ "$USER_TOKEN" = "levicode" ]; then
-    echo "Akses berhasil"
-  else
-    echo "Token salah!"
-    exit 1
-  fi
+  if [ "$USER_TOKEN" != "levicode" ]; then exit 1; fi
   clear
 }
 
@@ -40,23 +91,11 @@ install_theme() {
     2) THEME_NAME="billing" ;;
     3) THEME_NAME="enigma" ;;
     x) return ;;
-    *) echo "Pilihan tidak valid."; sleep 1; install_theme; return ;;
+    *) return ;;
   esac
 
-  THEME_URL="https://github.com/SkyzoOffc/Pterodactyl-Theme-Autoinstaller/raw/main/${THEME_NAME}.zip"
-  wget -q -O "/root/${THEME_NAME}.zip" "$THEME_URL" || { echo "Gagal mengunduh theme."; return; }
-
+  wget -q -O "/root/${THEME_NAME}.zip" "https://github.com/SkyzoOffc/Pterodactyl-Theme-Autoinstaller/raw/main/${THEME_NAME}.zip"
   unzip -oq "/root/${THEME_NAME}.zip" -d /root/pterodactyl
-
-  if [ "$THEME_NAME" == "enigma" ]; then
-    read -p "Link WhatsApp: " LINK_WA
-    read -p "Link Group: " LINK_GROUP
-    read -p "Link Channel: " LINK_CHNL
-
-    sed -i "s|LINK_WA|$LINK_WA|g" /root/pterodactyl/resources/scripts/components/dashboard/DashboardContainer.tsx
-    sed -i "s|LINK_GROUP|$LINK_GROUP|g" /root/pterodactyl/resources/scripts/components/dashboard/DashboardContainer.tsx
-    sed -i "s|LINK_CHNL|$LINK_CHNL|g" /root/pterodactyl/resources/scripts/components/dashboard/DashboardContainer.tsx
-  fi
 
   sudo cp -rfT /root/pterodactyl /var/www/pterodactyl
 
@@ -64,49 +103,23 @@ install_theme() {
   sudo apt install -y nodejs
   sudo npm install -g yarn
 
-  cd /var/www/pterodactyl || return
-
+  cd /var/www/pterodactyl || exit
   yarn add react-feather
   php artisan migrate
   yarn build:production
   php artisan view:clear
 
-  rm -f "/root/${THEME_NAME}.zip"
-  rm -rf /root/pterodactyl
-
-  echo "Install theme selesai."
-  sleep 1
-  clear
+  rm -rf /root/pterodactyl /root/${THEME_NAME}.zip
 }
 
 uninstall_theme() {
-  bash <(curl -s https://raw.githubusercontent.com/Levvyenc/EvoBotz/refs/heads/main/repair.sh)
-  echo "Theme berhasil dihapus."
-  sleep 1
-  clear
+  bash <(curl -s https://raw.githubusercontent.com/Levvyenc/EvoBotz/main/repair.sh)
 }
 
 install_themeSteeler() {
   wget -O /root/stellar.zip https://github.com/SkyzoOffc/Pterodactyl-Theme-Autoinstaller/raw/main/stellar.zip
   unzip /root/stellar.zip -d /root/pterodactyl
   sudo cp -rfT /root/pterodactyl /var/www/pterodactyl
-
-  curl -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
-  sudo apt install -y nodejs
-  sudo npm i -g yarn
-
-  cd /var/www/pterodactyl
-  yarn add react-feather
-  php artisan migrate
-  yarn build:production
-  php artisan view:clear
-
-  rm /root/stellar.zip
-  rm -rf /root/pterodactyl
-
-  echo "Install stellar selesai."
-  sleep 1
-  clear
 }
 
 create_node() {
@@ -118,8 +131,7 @@ create_node() {
   read -p "Disk (MB): " disk_space
   read -p "Loc ID: " locid
 
-  cd /var/www/pterodactyl || exit 1
-
+  cd /var/www/pterodactyl || exit
   php artisan p:location:make <<EOF
 $location_name
 $location_description
@@ -143,10 +155,6 @@ $disk_space
 2022
 /var/lib/pterodactyl/volumes
 EOF
-
-  echo "Node & lokasi selesai dibuat."
-  sleep 1
-  clear
 }
 
 uninstall_panel() {
@@ -156,49 +164,35 @@ y
 y
 y
 EOF
-  echo "Panel telah di uninstall."
-  sleep 1
-  clear
 }
 
 configure_wings() {
-  read -p "Masukkan token configure wings: " wings
+  read -p "Masukkan token wings: " wings
   eval "$wings"
   systemctl start wings
-  echo "Wings berhasil dikonfigurasi."
-  sleep 1
-  clear
 }
 
 hackback_panel() {
-  read -p "Username baru: " user
-  read -p "Password login: " psswdhb
+  read -p "Username: " user
+  read -p "Password: " pass
 
-  cd /var/www/pterodactyl || exit 1
-
+  cd /var/www/pterodactyl || exit
   php artisan p:user:make <<EOF
 yes
 hackback@gmail.com
 $user
 $user
 $user
-$psswdhb
+$pass
 EOF
-
-  echo "Akun berhasil ditambahkan."
-  sleep 1
 }
 
 ubahpw_vps() {
   read -p "Password baru: " pw
-
-passwd <<EOF
+  passwd <<EOF
 $pw
 $pw
 EOF
-
-  echo "Password VPS berhasil diganti."
-  sleep 1
 }
 
 display_welcome
@@ -207,7 +201,6 @@ check_token
 
 while true; do
   clear
-  echo "Menu:"
   echo "1. Install theme"
   echo "2. Uninstall theme"
   echo "3. Configure Wings"
@@ -216,12 +209,11 @@ while true; do
   echo "6. Stellar Theme"
   echo "7. Hack Back Panel"
   echo "8. Ubah Password VPS"
+  echo "9. Install Panel + Node (AUTO)"
   echo "x. Exit"
+  read -r MENU
 
-  read -r MENU_CHOICE
-  clear
-
-  case "$MENU_CHOICE" in
+  case "$MENU" in
     1) install_theme ;;
     2) uninstall_theme ;;
     3) configure_wings ;;
@@ -230,7 +222,12 @@ while true; do
     6) install_themeSteeler ;;
     7) hackback_panel ;;
     8) ubahpw_vps ;;
-    x) exit 0 ;;
-    *) echo "Pilihan tidak valid." ;;
+    9)
+      read -p "Domain Panel: " PD
+      read -p "Domain Node: " ND
+      read -p "RAM (MB): " RAM
+      installpanel_auto "$PD" "$ND" "$RAM"
+      ;;
+    x) exit ;;
   esac
 done
