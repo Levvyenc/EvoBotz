@@ -1,33 +1,38 @@
 #!/bin/bash
 
-set -e
-PANEL_PATH="/var/www/pterodactyl"
-
-# ===============================
-# AUTO MODE (KHUSUS BOT)
-# ===============================
-if [[ "$1" == "auto" ]]; then
-  DOMAIN_NODE="$2"
+installpanel_auto() {
+  PANEL_DOMAIN="$1"
+  NODE_DOMAIN="$2"
   RAM="$3"
 
-  cd $PANEL_PATH || exit 1
-
-  echo "STEP|CREATE_LOCATION"
-  php artisan p:location:make --no-interaction <<EOF
-Singapore
-Auto Node
+  bash <(curl -s https://pterodactyl-installer.se) <<EOF
+y
+y
+y
+y
+$PANEL_DOMAIN
+admin
+admin@$PANEL_DOMAIN
+admin
+admin
+y
 EOF
 
-  LOCID=$(php artisan p:location:list | awk 'NR>2 {print $1}' | tail -n 1)
-  NODE_NAME="Node-$(date +%s)"
+  cd /var/www/pterodactyl || exit 1
 
-  echo "STEP|CREATE_NODE"
-  php artisan p:node:make --no-interaction <<EOF
-$NODE_NAME
-Auto Node
+  php artisan p:location:make <<EOF
+Singapore
+Auto Location
+EOF
+
+  LOCID=$(php artisan p:location:list | awk 'NR>2 {print $1}' | tail -n1)
+
+  php artisan p:node:make <<EOF
+AutoNode
+AutoNode
 $LOCID
-$DOMAIN_NODE
 https
+$NODE_DOMAIN
 no
 no
 no
@@ -41,15 +46,15 @@ $RAM
 /var/lib/pterodactyl/volumes
 EOF
 
-  systemctl enable --now wings || true
+  NODEID=$(php artisan p:node:list | awk 'NR>2 {print $1}' | tail -n1)
 
-  echo "NODE_OK|$NODE_NAME|$DOMAIN_NODE|$RAM"
-  exit 0
-fi
+  php artisan p:node:configuration $NODEID > /root/wings.sh
+  chmod +x /root/wings.sh
+  bash /root/wings.sh
 
-# ===============================
-# MODE MANUAL 
-# ===============================
+  systemctl enable wings
+  systemctl restart wings
+}
 
 display_welcome() {
   echo ""
@@ -60,87 +65,133 @@ display_welcome() {
 }
 
 install_jq() {
-  apt update && apt install -y jq unzip curl
+  sudo apt update && sudo apt install -y jq curl unzip || exit 1
   clear
 }
 
 check_token() {
-  read -p "Masukkan akses token: " USER_TOKEN
-  [[ "$USER_TOKEN" != "levicode" ]] && exit 1
+  echo "Masukkan akses token:"
+  read -r USER_TOKEN
+  if [ "$USER_TOKEN" != "levicode" ]; then exit 1; fi
   clear
 }
 
 install_theme() {
   clear
+  echo "Pilih theme:"
   echo "1. Stellar"
   echo "2. Billing"
   echo "3. Enigma"
-  read -p "Pilih: " SELECT_THEME
+  echo "x. Kembali"
+  read -r SELECT_THEME
 
   case "$SELECT_THEME" in
     1) THEME_NAME="stellar" ;;
     2) THEME_NAME="billing" ;;
     3) THEME_NAME="enigma" ;;
+    x) return ;;
     *) return ;;
   esac
 
-  wget -O /root/theme.zip \
-  https://github.com/SkyzoOffc/Pterodactyl-Theme-Autoinstaller/raw/main/${THEME_NAME}.zip
+  wget -q -O "/root/${THEME_NAME}.zip" "https://github.com/SkyzoOffc/Pterodactyl-Theme-Autoinstaller/raw/main/${THEME_NAME}.zip"
+  unzip -oq "/root/${THEME_NAME}.zip" -d /root/pterodactyl
 
-  unzip -oq /root/theme.zip -d /root/pterodactyl
-  cp -rfT /root/pterodactyl $PANEL_PATH
+  sudo cp -rfT /root/pterodactyl /var/www/pterodactyl
 
-  curl -sL https://deb.nodesource.com/setup_16.x | bash -
-  apt install -y nodejs
-  npm i -g yarn
+  curl -sL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+  sudo apt install -y nodejs
+  sudo npm install -g yarn
 
-  cd $PANEL_PATH
+  cd /var/www/pterodactyl || exit
   yarn add react-feather
+  php artisan migrate
   yarn build:production
   php artisan view:clear
 
-  rm -rf /root/theme.zip /root/pterodactyl
+  rm -rf /root/pterodactyl /root/${THEME_NAME}.zip
+}
+
+uninstall_theme() {
+  bash <(curl -s https://raw.githubusercontent.com/Levvyenc/EvoBotz/main/repair.sh)
+}
+
+install_themeSteeler() {
+  wget -O /root/stellar.zip https://github.com/SkyzoOffc/Pterodactyl-Theme-Autoinstaller/raw/main/stellar.zip
+  unzip /root/stellar.zip -d /root/pterodactyl
+  sudo cp -rfT /root/pterodactyl /var/www/pterodactyl
 }
 
 create_node() {
-  read -p "Domain node: " DOMAIN
-  read -p "RAM (MB): " RAM
-  bash $0 auto "$DOMAIN" "$RAM"
-}
+  read -p "Nama lokasi: " location_name
+  read -p "Deskripsi: " location_description
+  read -p "Domain: " domain
+  read -p "Nama node: " node_name
+  read -p "RAM (MB): " ram
+  read -p "Disk (MB): " disk_space
+  read -p "Loc ID: " locid
 
-configure_wings() {
-  read -p "Paste command configure wings: " CMD
-  bash -c "$CMD"
-  systemctl enable --now wings
-}
-
-hackback_panel() {
-  read -p "Username baru: " USER
-  read -p "Password: " PASS
-
-  EMAIL="hb_$(date +%s)@gmail.com"
-
-  cd $PANEL_PATH
-  php artisan p:user:make <<EOF
-yes
-$EMAIL
-$USER
-$USER
-$USER
-$PASS
+  cd /var/www/pterodactyl || exit
+  php artisan p:location:make <<EOF
+$location_name
+$location_description
 EOF
-}
 
-ubahpw_vps() {
-  read -p "Password baru: " PW
-  passwd <<EOF
-$PW
-$PW
+  php artisan p:node:make <<EOF
+$node_name
+$location_description
+$locid
+https
+$domain
+yes
+no
+no
+$ram
+$ram
+$disk_space
+$disk_space
+100
+8080
+2022
+/var/lib/pterodactyl/volumes
 EOF
 }
 
 uninstall_panel() {
-  bash <(curl -s https://pterodactyl-installer.se)
+  bash <(curl -s https://pterodactyl-installer.se) <<EOF
+y
+y
+y
+y
+EOF
+}
+
+configure_wings() {
+  read -p "Masukkan token wings: " wings
+  eval "$wings"
+  systemctl start wings
+}
+
+hackback_panel() {
+  read -p "Username: " user
+  read -p "Password: " pass
+
+  cd /var/www/pterodactyl || exit
+  php artisan p:user:make <<EOF
+yes
+hackback@gmail.com
+$user
+$user
+$user
+$pass
+EOF
+}
+
+ubahpw_vps() {
+  read -p "Password baru: " pw
+  passwd <<EOF
+$pw
+$pw
+EOF
 }
 
 display_welcome
@@ -149,22 +200,33 @@ check_token
 
 while true; do
   clear
-  echo "1. Install Theme"
-  echo "2. Create Node"
+  echo "1. Install theme"
+  echo "2. Uninstall theme"
   echo "3. Configure Wings"
-  echo "4. Hack Back Panel"
-  echo "5. Ubah Password VPS"
-  echo "6. Uninstall Panel"
+  echo "4. Create Node"
+  echo "5. Uninstall Panel"
+  echo "6. Stellar Theme"
+  echo "7. Hack Back Panel"
+  echo "8. Ubah Password VPS"
+  echo "9. Install Panel + Node (AUTO)"
   echo "x. Exit"
-  read -p "Pilih: " MENU
+  read -r MENU
 
   case "$MENU" in
     1) install_theme ;;
-    2) create_node ;;
+    2) uninstall_theme ;;
     3) configure_wings ;;
-    4) hackback_panel ;;
-    5) ubahpw_vps ;;
-    6) uninstall_panel ;;
+    4) create_node ;;
+    5) uninstall_panel ;;
+    6) install_themeSteeler ;;
+    7) hackback_panel ;;
+    8) ubahpw_vps ;;
+    9)
+      read -p "Domain Panel: " PD
+      read -p "Domain Node: " ND
+      read -p "RAM (MB): " RAM
+      installpanel_auto "$PD" "$ND" "$RAM"
+      ;;
     x) exit ;;
   esac
 done
